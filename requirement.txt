@@ -1,0 +1,15 @@
+streamlit
+opencv-python
+numpy
+ultralytics
+easyocr
+pymongo
+Pillow
+torch
+torchvision
+pandas
+scipy
+matplotlib
+pyyaml
+requests
+python-dateutil
