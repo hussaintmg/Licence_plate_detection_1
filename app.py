@@ -81,11 +81,12 @@ def load_models():
     vehicle_model = None
     pkl_path = "models/vehicle_detection_model.pkl"
     pt_veh   = "models/vehicle_detection_model.pt"
+
     if os.path.exists(pkl_path):
         try:
             vehicle_model = YOLO(pkl_path)
         except Exception:
-            vehicle_model = YOLO("yolov8n.pt")   # fallback
+            vehicle_model = YOLO("yolov8n.pt")  # fallback
     elif os.path.exists(pt_veh):
         vehicle_model = YOLO(pt_veh)
     else:
