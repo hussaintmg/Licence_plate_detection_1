@@ -544,7 +544,10 @@ col1, col2, col3 = st.columns(3)
 with col1:
     st.success("✅ Vehicle Model Ready")
 with col2:
-    st.success("✅ Plate Model Ready") if plate_model else st.warning("⚠️ Plate Model Missing")
+    if plate_model:
+        st.success("✅ Plate Model Ready")
+    else:
+        st.warning("⚠️ Plate Model Missing")
 with col3:
     st.success("✅ OCR Ready")
 
