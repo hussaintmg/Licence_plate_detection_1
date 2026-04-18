@@ -1,0 +1,8 @@
+detection_results.pkl
+/notebooks/02_Fixed_Tracking.ipynb
+/notebooks/02_Vehicle_Tracking_Counting.ipynb
+/notebooks/02b_Smart_Adaptive_Tracking.ipynb
+.env
+test_run.py
+__pycache__
+detections_data
