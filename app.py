@@ -1,9 +1,10 @@
+import os
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "0"
 import streamlit as st
 import cv2
 import numpy as np
 import math
 import tempfile
-import os
 import time
 import easyocr
 import pickle
