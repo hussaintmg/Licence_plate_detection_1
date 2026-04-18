@@ -54,7 +54,7 @@ def get_mongo():
         col = db["vehicle_logs"]
         return col
     except Exception as e:
-        st.warning(f"⚠️ MongoDB connect nahi hua: {e} — Data sirf screen pe dikhega")
+        st.warning(f"⚠️ MongoDB connection failed: {e} — Data will only be displayed on screen.")
         return None
 
 def save_to_mongo(col, record):
@@ -82,13 +82,15 @@ def load_models():
     pkl_path = "models/vehicle_detection_model.pkl"
     pt_veh   = "models/vehicle_detection_model.pt"
 
-    if os.path.exists(pkl_path):
+    if os.path.exists(pt_veh):
         try:
-            vehicle_model = YOLO(pkl_path)
+            vehicle_model = YOLO(pt_veh)
         except Exception:
-            vehicle_model = YOLO("yolov8n.pt")  # fallback
-    elif os.path.exists(pt_veh):
-        vehicle_model = YOLO(pt_veh)
+            vehicle_model = YOLO("yolov8n.pt")
+    elif os.path.exists(pkl_path):
+        # If it's a .pkl, it might be a custom non-YOLO model. 
+        # YOLO() might fail on it, so we fallback to a standard model for compatibility.
+        vehicle_model = YOLO("yolov8n.pt") 
     else:
         vehicle_model = YOLO("yolov8n.pt")
 
@@ -362,10 +364,10 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
                   progress_bar, status_text, frame_placeholder):
 
     # ── Step 1: Motion Analysis ──────────────────────────────────────
-    status_text.info("🔍 Step 1: Motion analysis chal rahi hai...")
+    status_text.info("🔍 Step 1: Analyzing motion...")
     motion_info = analyze_video_motion(video_path, sample_frames=60)
     if motion_info is None:
-        st.error("❌ Video open nahi hua!")
+        st.error("❌ Could not open video file!")
         return None, []
 
     direction_str = motion_info.get('direction', 'Unknown')
@@ -390,7 +392,7 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
     all_logs    = []
     frame_num   = 0
 
-    status_text.info("🚗 Step 3: Tracking + Detection shuru...")
+    status_text.info("🚗 Step 3: Starting Tracking + Detection...")
 
     while True:
         ret, frame = cap.read()
@@ -531,16 +533,11 @@ st.markdown("---")
 with st.sidebar:
     st.header("⚙️ Settings")
     line_ratio  = st.slider("Counting Line Position", 0.50, 0.95, 0.90, 0.05,
-                             help="Frame ki kitni % height pe line ho (default 90%)")
+                             help="Position of the counting line as % of frame height.")
     conf_thresh = st.slider("Detection Confidence", 0.20, 0.80, 0.30, 0.05)
-    st.markdown("---")
-    st.markdown("**Models Path:**")
-    st.code("models/vehicle_detection_model.pkl\nmodels/license_plate_detector.pt")
-    st.markdown("**MongoDB:** `localhost:27017`")
-    st.markdown("**DB:** `smart_city`  |  **Collection:** `vehicle_logs`")
 
 # ── Load models ───────────────────────────────────────────────────
-with st.spinner("🔧 Models load ho rahe hain..."):
+with st.spinner("🔧 Loading models..."):
     vehicle_model, plate_model, ocr_reader = load_models()
 
 col1, col2, col3 = st.columns(3)
@@ -558,7 +555,7 @@ mongo_col = get_mongo()
 
 # ── File Upload ───────────────────────────────────────────────────
 uploaded = st.file_uploader(
-    "📁 Traffic Video Upload Karo",
+    "📁 Upload Traffic Video",
     type=["mp4", "avi", "mov", "mkv"]
 )
 
@@ -572,7 +569,7 @@ if uploaded:
 
     st.video(input_path)
 
-    if st.button("🚀 Tracking Shuru Karo", type="primary", use_container_width=True):
+    if st.button("🚀 Start Tracking", type="primary", use_container_width=True):
         st.markdown("---")
         st.subheader("📡 Live Processing")
 
@@ -626,7 +623,7 @@ if uploaded:
         if os.path.exists(output_path):
             with open(output_path, "rb") as vf:
                 st.download_button(
-                    label     = "⬇️ Tracked Video Download Karo",
+                    label     = "⬇️ Download Tracked Video",
                     data      = vf,
                     file_name = "tracked_output.mp4",
                     mime      = "video/mp4",
@@ -676,19 +673,19 @@ if uploaded:
             # CSV download
             csv = filtered.to_csv(index=False).encode("utf-8")
             st.download_button(
-                "⬇️ CSV Download Karo",
+                "⬇️ Download CSV Log",
                 data      = csv,
                 file_name = "vehicle_logs.csv",
                 mime      = "text/csv"
             )
         else:
-            st.info("Koi vehicle line cross nahi ki abhi tak.")
+            st.info("No vehicles have crossed the line yet.")
 
 # ═══════════════════════════════════════════════════════════════════
 #  BOTTOM — MongoDB Previous Logs
 # ═══════════════════════════════════════════════════════════════════
 st.markdown("---")
-with st.expander("🗄️ MongoDB — Pichle Saare Logs Dekho"):
+with st.expander("🗄️ MongoDB — View Historical Logs"):
     if mongo_col is not None:
         prev_logs = fetch_logs(mongo_col)
         if prev_logs:
@@ -697,6 +694,6 @@ with st.expander("🗄️ MongoDB — Pichle Saare Logs Dekho"):
             st.dataframe(pdf, use_container_width=True, height=350)
             st.caption(f"Total DB records: {len(prev_logs)}")
         else:
-            st.info("Database mein abhi koi record nahi hai.")
+            st.info("No records found in the database.")
     else:
-        st.warning("MongoDB connected nahi hai.")
+        st.warning("MongoDB is not connected.")
