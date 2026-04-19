@@ -481,12 +481,13 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
     FPS = motion_info['fps'] or 30
     TOT = motion_info['total']
 
-    # Using 'avc1' for H.264
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+    # Using 'mp4v' for better compatibility on standard Linux/Streamlit Cloud
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out_wr = cv2.VideoWriter(output_path, fourcc, FPS, (W, H))
     
     if not out_wr.isOpened():
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        # Fallback to 'avc1' or 'XVID'
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')
         out_wr = cv2.VideoWriter(output_path, fourcc, FPS, (W, H))
 
     tracker      = SimpleTracker(max_disappeared=40, iou_threshold=0.25)
@@ -600,7 +601,7 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
             
             if show_preview:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame_placeholder.image(rgb, channels="RGB", use_container_width=True)
+                frame_placeholder.image(rgb, channels="RGB", width="stretch")
             
             status_text.markdown(f"""
             <div style="color: #00ffe0; font-size: 0.9rem; margin-top: 10px;">
@@ -678,7 +679,7 @@ with tab1:
         
         with c2:
             st.markdown("#### ⚙️ Operations")
-            if st.button("🚀 INITIATE ANALYSIS", type="primary", use_container_width=True):
+            if st.button("🚀 INITIATE ANALYSIS", type="primary", width="stretch"):
                 # UI Placeholders
                 prog_container = st.container()
                 with prog_container:
@@ -730,13 +731,13 @@ with tab1:
 
                 st.markdown("#### 📥 DOWNLOADS")
                 with open(res['output_path'], "rb") as f:
-                    st.download_button("💾 DOWNLOAD PROCESSED VIDEO", f, "processed_traffic.mp4", "video/mp4", use_container_width=True)
+                    st.download_button("💾 DOWNLOAD PROCESSED VIDEO", f, "processed_traffic.mp4", "video/mp4", width="stretch")
                 
                 if res['logs']:
                     import pandas as pd
                     pdf = pd.DataFrame(res['logs'])
                     csv = pdf.to_csv(index=False).encode('utf-8')
-                    st.download_button("📊 DOWNLOAD EVENT LOG (CSV)", csv, "traffic_logs.csv", "text/csv", use_container_width=True)
+                    st.download_button("📊 DOWNLOAD EVENT LOG (CSV)", csv, "traffic_logs.csv", "text/csv", width="stretch")
 
 with tab2:
     if st.session_state.results:
@@ -761,7 +762,7 @@ with tab2:
         if res['logs']:
             st.markdown("### 📋 EVENT TIMELINE")
             df = pd.DataFrame(res['logs'])
-            st.dataframe(df, use_container_width=True, height=500)
+            st.dataframe(df, width="stretch", height=500)
     else:
         st.info("Analysis required to view analytics. Please upload and process a video.")
 
@@ -773,7 +774,7 @@ with tab3:
         if prev_logs:
             import pandas as pd
             pdf = pd.DataFrame(prev_logs)
-            st.dataframe(pdf, use_container_width=True, height=600)
+            st.dataframe(pdf, width="stretch", height=600)
         else:
             st.info("No records found in cloud database.")
     else:
