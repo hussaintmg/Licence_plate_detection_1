@@ -25,20 +25,98 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .main { background-color: #0e1117; }
-    .stProgress .st-bo { background-color: #00ffe0; }
-    .metric-card {
-        background: #1a1d27;
-        border: 1px solid #00ffe0;
-        border-radius: 10px;
-        padding: 16px;
-        text-align: center;
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+    
+    * { font-family: 'Outfit', sans-serif; }
+    
+    .main { 
+        background-color: #0b0e14;
+        background-image: radial-gradient(circle at 50% 0%, #1c2331 0%, #0b0e14 100%);
     }
-    .metric-val { font-size: 2.2rem; font-weight: bold; color: #00ffe0; }
-    .metric-lbl { font-size: 0.85rem; color: #aaaaaa; margin-top: 4px; }
-    div[data-testid="stDataFrame"] { border: 1px solid #333; border-radius: 8px; }
+    
+    .stApp { background: transparent; }
+    
+    /* Premium Metric Cards */
+    .metric-container {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-bottom: 2rem;
+    }
+    
+    .metric-card {
+        flex: 1;
+        min-width: 180px;
+        background: rgba(30, 36, 50, 0.6);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(0, 255, 224, 0.15);
+        border-radius: 16px;
+        padding: 24px;
+        text-align: left;
+        transition: transform 0.3s ease, border-color 0.3s ease;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-5px);
+        border-color: rgba(0, 255, 224, 0.4);
+    }
+    
+    .metric-val { 
+        font-size: 2.5rem; 
+        font-weight: 700; 
+        color: #00ffe0;
+        text-shadow: 0 0 10px rgba(0, 255, 224, 0.3);
+    }
+    
+    .metric-lbl { 
+        font-size: 0.9rem; 
+        color: #9da5b4; 
+        margin-top: 4px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    /* Progress and Status */
+    .stProgress .st-bo { background: linear-gradient(90deg, #00ffe0, #0088ff); }
+    
+    /* Tabs styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
+        background-color: transparent;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        background-color: transparent;
+        border: none;
+        color: #9da5b4;
+        font-weight: 600;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        color: #00ffe0 !important;
+        border-bottom: 2px solid #00ffe0 !important;
+    }
+
+    /* DataFrame styling */
+    div[data-testid="stDataFrame"] {
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    
+    .status-msg {
+        padding: 1rem;
+        border-radius: 12px;
+        background: rgba(0, 255, 224, 0.05);
+        border: 1px solid rgba(0, 255, 224, 0.2);
+        color: #00ffe0;
+        margin-bottom: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  MONGODB CONNECTION
@@ -361,17 +439,17 @@ def draw_stats_box(frame, count):
 # ═══════════════════════════════════════════════════════════════════
 def process_video(video_path, output_path, vehicle_model, plate_model,
                   ocr_reader, mongo_col, line_ratio,
-                  progress_bar, status_text, frame_placeholder):
+                  progress_bar, status_text, frame_placeholder, show_preview=True):
 
     # ── Step 1: Motion Analysis ──────────────────────────────────────
-    status_text.info("🔍 Step 1: Analyzing motion...")
+    status_text.markdown('<div class="status-msg">🔍 Step 1: Analyzing motion patterns...</div>', unsafe_allow_html=True)
     motion_info = analyze_video_motion(video_path, sample_frames=60)
     if motion_info is None:
         st.error("❌ Could not open video file!")
         return None, []
 
     direction_str = motion_info.get('direction', 'Unknown')
-    status_text.info(f"✅ Motion detected: {direction_str}")
+    status_text.markdown(f'<div class="status-msg">✅ Motion detected: <b>{direction_str}</b></div>', unsafe_allow_html=True)
 
     # ── Step 2: Build Line ───────────────────────────────────────────
     line_cfg = build_counting_line(motion_info, ratio=line_ratio)
@@ -383,8 +461,15 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
     FPS = motion_info['fps'] or 30
     TOT = motion_info['total']
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    # Using 'avc1' for H.264 encoding which is better for web browsers
+    # Fallback to 'mp4v' if 'avc1' is not available
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')
     out_wr = cv2.VideoWriter(output_path, fourcc, FPS, (W, H))
+    
+    # Check if writer opened with avc1, if not fallback
+    if not out_wr.isOpened():
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out_wr = cv2.VideoWriter(output_path, fourcc, FPS, (W, H))
 
     tracker     = SimpleTracker(max_disappeared=40, iou_threshold=0.25)
     count       = defaultdict(int)
@@ -392,7 +477,7 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
     all_logs    = []
     frame_num   = 0
 
-    status_text.info("🚗 Step 3: Starting Tracking + Detection...")
+    status_text.markdown('<div class="status-msg">🚗 Step 2: Processing frames & detecting vehicles...</div>', unsafe_allow_html=True)
 
     while True:
         ret, frame = cap.read()
@@ -403,14 +488,15 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
         current_second = round(frame_num / FPS, 2)
 
         # ── Vehicle Detection ────────────────────────────────────────
-        v_results  = vehicle_model(frame, verbose=False)[0]
+        v_results  = vehicle_model(frame, verbose=False, stream=True)
         detections = []
-        for box in v_results.boxes:
-            cls_id = int(box.cls[0])
-            conf   = float(box.conf[0])
-            if cls_id in VEHICLE_CLASSES and conf > 0.30:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                detections.append((x1, y1, x2, y2, VEHICLE_CLASSES[cls_id], conf))
+        for result in v_results:
+            for box in result.boxes:
+                cls_id = int(box.cls[0])
+                conf   = float(box.conf[0])
+                if cls_id in VEHICLE_CLASSES and conf > 0.30:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    detections.append((x1, y1, x2, y2, VEHICLE_CLASSES[cls_id], conf))
 
         # ── Tracker Update ───────────────────────────────────────────
         tracked = tracker.update(detections)
@@ -428,16 +514,12 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
             # Vehicle bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
-            # Vehicle name label (top of box)
-            v_label = f"{cls_name.upper()}  ID:{tid}"
+            # Vehicle name label
+            v_label = f"{cls_name.upper()} ID:{tid}"
             (lw, lh), _ = cv2.getTextSize(v_label, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 2)
             cv2.rectangle(frame, (x1, y1-lh-10), (x1+lw+6, y1), color, -1)
             cv2.putText(frame, v_label, (x1+3, y1-4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 0, 0), 2)
-
-            # Centroid dot
-            cv2.circle(frame, (cx, cy), 5, (255, 255, 255), -1)
-            cv2.circle(frame, (cx, cy), 8, color, 2)
 
             # ── License Plate Detection ──────────────────────────────
             plate_text = "UNKNOWN"
@@ -446,36 +528,22 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
                 if vehicle_crop.size > 0:
                     p_results = plate_model(vehicle_crop, verbose=False)[0]
                     for pbox in p_results.boxes:
-                        pconf = float(pbox.conf[0])
-                        if pconf > 0.30:
+                        if float(pbox.conf[0]) > 0.30:
                             px1,py1,px2,py2 = map(int, pbox.xyxy[0])
-                            # Plate bounding box (absolute coords)
-                            abs_px1 = x1 + px1; abs_py1 = y1 + py1
-                            abs_px2 = x1 + px2; abs_py2 = y1 + py2
+                            abs_px1, abs_py1 = x1 + px1, y1 + py1
+                            abs_px2, abs_py2 = x1 + px2, y1 + py2
 
-                            cv2.rectangle(frame,
-                                          (abs_px1, abs_py1),
-                                          (abs_px2, abs_py2),
-                                          (0, 165, 255), 2)
+                            cv2.rectangle(frame, (abs_px1, abs_py1), (abs_px2, abs_py2), (0, 165, 255), 2)
 
-                            # OCR on plate crop
                             plate_crop = vehicle_crop[max(0,py1):py2, max(0,px1):px2]
                             if plate_crop.size > 0:
                                 plate_text = extract_plate_text(ocr_reader, plate_crop)
 
-                            # Plate label above plate box
                             p_label = f"PLATE: {plate_text}"
-                            (pw, ph), _ = cv2.getTextSize(
-                                p_label, cv2.FONT_HERSHEY_SIMPLEX, 0.50, 2)
-                            cv2.rectangle(frame,
-                                          (abs_px1, abs_py1-ph-10),
-                                          (abs_px1+pw+6, abs_py1),
-                                          (0, 100, 200), -1)
-                            cv2.putText(frame, p_label,
-                                        (abs_px1+3, abs_py1-4),
-                                        cv2.FONT_HERSHEY_SIMPLEX,
-                                        0.50, (255, 255, 255), 2)
-                            break   # sirf pehli/best plate
+                            (pw, ph), _ = cv2.getTextSize(p_label, cv2.FONT_HERSHEY_SIMPLEX, 0.50, 2)
+                            cv2.rectangle(frame, (abs_px1, abs_py1-ph-10), (abs_px1+pw+6, abs_py1), (0, 100, 200), -1)
+                            cv2.putText(frame, p_label, (abs_px1+3, abs_py1-4), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 255, 255), 2)
+                            break
 
             # ── Line Crossing Check ──────────────────────────────────
             if tid not in counted_ids:
@@ -485,39 +553,40 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
                     count[cls_name] += 1
                     tracker.tracks[tid]['counted'] = True
 
-                    # Flash ring
-                    cv2.circle(frame, (cx, cy), 24, (0, 255, 0), 3)
-                    cv2.circle(frame, (cx, cy), 32, (0, 255, 0), 1)
-
-                    # Build log record
+                    # Event log
                     record = {
-                        "track_id"    : int(tid),
+                        "track_id": int(tid),
                         "vehicle_type": cls_name,
                         "plate_number": plate_text,
                         "frame_number": int(frame_num),
-                        "second"      : float(current_second),
-                        "timestamp"   : datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "confidence"  : round(float(conf), 2),
+                        "second": float(current_second),
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "confidence": round(float(conf), 2),
                     }
                     all_logs.append(record)
                     save_to_mongo(mongo_col, record.copy())
 
-        # ── Top Stats Box ────────────────────────────────────────────
+        # ── Annotatons ───────────────────────────────────────────────
         draw_stats_box(frame, count)
-
-        # ── Write frame ──────────────────────────────────────────────
         out_wr.write(frame)
 
-        # ── Streamlit live preview (har 15 frames) ───────────────────
-        if frame_num % 15 == 0:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame_placeholder.image(rgb, channels="RGB", use_container_width=True)
-            progress_bar.progress(min(frame_num / max(TOT, 1), 1.0))
-            status_text.info(
-                f"⚙️ Frame {frame_num}/{TOT} | "
-                f"Counted: {sum(count.values())} | "
-                f"Time: {current_second:.1f}s"
-            )
+        # ── UI Update (Throttled) ───────────────────────────────────
+        if frame_num % 30 == 0 or frame_num == TOT:
+            progress = min(frame_num / max(TOT, 1), 1.0)
+            progress_bar.progress(progress)
+            
+            if show_preview:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame_placeholder.image(rgb, channels="RGB", use_container_width=True)
+            
+            # Subtle update instead of spam
+            status_text.markdown(f"""
+            <div style="color: #00ffe0; font-size: 0.9rem; margin-top: 10px;">
+                Processing: <b>{frame_num}/{TOT}</b> frames | 
+                Vehicles Counted: <b>{sum(count.values())}</b> | 
+                Elapsed Simulation: <b>{current_second:.1f}s</b>
+            </div>
+            """, unsafe_allow_html=True)
 
     cap.release()
     out_wr.release()
@@ -526,177 +595,159 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
 # ═══════════════════════════════════════════════════════════════════
 #  STREAMLIT UI
 # ═══════════════════════════════════════════════════════════════════
-st.title("🚦 Smart City — Vehicle Tracking & License Plate System")
-st.markdown("---")
+# ═══════════════════════════════════════════════════════════════════
+#  STREAMLIT UI
+# ═══════════════════════════════════════════════════════════════════
+
+# Header with custom styling
+st.markdown("""
+    <div style="display: flex; align-items: center; margin-bottom: 2rem;">
+        <span style="font-size: 3rem; margin-right: 1.5rem;">🚦</span>
+        <div>
+            <h1 style="margin: 0; color: #ffffff; font-weight: 700;">Smart City AI</h1>
+            <p style="margin: 0; color: #00ffe0; letter-spacing: 2px; font-weight: 300;">NEXT-GEN TRAFFIC ANALYTICS SYSTEM</p>
+        </div>
+    </div>
+""", unsafe_allow_html=True)
 
 # ── Sidebar ──────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.markdown("### 🛠️ CONFIGURATION")
     line_ratio  = st.slider("Counting Line Position", 0.50, 0.95, 0.90, 0.05,
                              help="Position of the counting line as % of frame height.")
     conf_thresh = st.slider("Detection Confidence", 0.20, 0.80, 0.30, 0.05)
+    
+    st.markdown("---")
+    st.markdown("### 💡 PREFERENCE")
+    show_preview = st.checkbox("Show Real-time Preview", value=True, help="Turning this off speeds up processing.")
+    
+    st.markdown("---")
+    # GitHub Integration Hint
+    st.info("📦 **Repository Status**\nOrigin: hussaintmg/Licence_plate_detection_1\nBranch: main")
 
-# ── Load models ───────────────────────────────────────────────────
-with st.spinner("🔧 Loading models..."):
-    vehicle_model, plate_model, ocr_reader = load_models()
+# ── Initialize session state ──────────────────────────────────────
+if 'results' not in st.session_state:
+    st.session_state.results = None
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.success("✅ Vehicle Model Ready")
-with col2:
-    if plate_model:
-        st.success("✅ Plate Model Ready")
-    else:
-        st.warning("⚠️ Plate Model Missing")
-with col3:
-    st.success("✅ OCR Ready")
+# ── Main Tabs ─────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs(["📤 UPLOAD & PROCESS", "📊 ANALYTICS", "🗄️ HISTORY"])
 
-st.markdown("---")
+with tab1:
+    # ── File Upload ───────────────────────────────────────────────
+    uploaded = st.file_uploader(
+        "DROP TRAFFIC VIDEO OR CLICK TO UPLOAD",
+        type=["mp4", "avi", "mov", "mkv"],
+        label_visibility="collapsed"
+    )
 
-# ── MongoDB ───────────────────────────────────────────────────────
-mongo_col = get_mongo()
+    if uploaded:
+        # Save to temp
+        tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        tfile.write(uploaded.read())
+        tfile.flush()
+        input_path  = tfile.name
+        output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
 
-# ── File Upload ───────────────────────────────────────────────────
-uploaded = st.file_uploader(
-    "📁 Upload Traffic Video",
-    type=["mp4", "avi", "mov", "mkv"]
-)
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            st.markdown("#### 原 Source Video")
+            st.video(input_path)
+        
+        with c2:
+            st.markdown("#### ⚙️ Operations")
+            if st.button("🚀 INITIATE ANALYSIS", type="primary", use_container_width=True):
+                # UI Placeholders
+                prog_container = st.container()
+                with prog_container:
+                    progress_bar = st.progress(0)
+                    status_text  = st.empty()
+                    frame_placeholder = st.empty()
 
-if uploaded:
-    # Save uploaded video to temp file
-    tfile = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-    tfile.write(uploaded.read())
-    tfile.flush()
-    input_path  = tfile.name
-    output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+                # Process
+                vehicle_model, plate_model, ocr_reader = load_models()
+                mongo_col = get_mongo()
+                final_count, all_logs = process_video(
+                    video_path = input_path,
+                    output_path = output_path,
+                    vehicle_model = vehicle_model,
+                    plate_model = plate_model,
+                    ocr_reader = ocr_reader,
+                    mongo_col = mongo_col,
+                    line_ratio = line_ratio,
+                    progress_bar = progress_bar,
+                    status_text = status_text,
+                    frame_placeholder = frame_placeholder,
+                    show_preview = show_preview
+                )
 
-    st.video(input_path)
+                st.session_state.results = {
+                    'count': final_count,
+                    'logs': all_logs,
+                    'output_path': output_path
+                }
+                st.success("Analysis Complete!")
+                st.rerun()
 
-    if st.button("🚀 Start Tracking", type="primary", use_container_width=True):
-        st.markdown("---")
-        st.subheader("📡 Live Processing")
+        # Display Results if available
+        if st.session_state.results:
+            res = st.session_state.results
+            st.markdown("---")
+            st.markdown("### 🎥 TRACKED OUTPUT")
+            
+            out_c1, out_c2 = st.columns([2, 1])
+            
+            with out_c1:
+                if os.path.exists(res['output_path']):
+                    st.video(res['output_path'])
+            
+            with out_c2:
+                st.markdown("#### 📥 DOWNLOADS")
+                with open(res['output_path'], "rb") as f:
+                    st.download_button("💾 DOWNLOAD PROCESSED VIDEO", f, "processed_traffic.mp4", "video/mp4", use_container_width=True)
+                
+                if res['logs']:
+                    import pandas as pd
+                    pdf = pd.DataFrame(res['logs'])
+                    csv = pdf.to_csv(index=False).encode('utf-8')
+                    st.download_button("📊 DOWNLOAD EVENT LOG (CSV)", csv, "traffic_logs.csv", "text/csv", use_container_width=True)
 
-        progress_bar      = st.progress(0)
-        status_text       = st.empty()
-        frame_placeholder = st.empty()
-
-        # ── Run Processing ────────────────────────────────────────────
-        final_count, all_logs = process_video(
-            video_path    = input_path,
-            output_path   = output_path,
-            vehicle_model = vehicle_model,
-            plate_model   = plate_model,
-            ocr_reader    = ocr_reader,
-            mongo_col     = mongo_col,
-            line_ratio    = line_ratio,
-            progress_bar  = progress_bar,
-            status_text   = status_text,
-            frame_placeholder = frame_placeholder
-        )
-
-        progress_bar.progress(1.0)
-        status_text.success("✅ Processing Complete!")
-        frame_placeholder.empty()
-
-        # ═══════════════════════════════════════════════════════════
-        #  RESULTS
-        # ═══════════════════════════════════════════════════════════
-        st.markdown("---")
-        st.subheader("📊 Final Results")
-
-        # Metric cards — top row
-        total = sum(final_count.values()) if final_count else 0
-        m_cols = st.columns(5)
-        metrics = [("🚗 Total", total, "#00ffe0"),
-                   ("🚙 Cars",  final_count.get('car', 0),        "#00ff00"),
-                   ("🛵 Bikes", final_count.get('motorcycle', 0), "#ffa500"),
-                   ("🚌 Buses", final_count.get('bus', 0),        "#0055ff"),
-                   ("🚛 Trucks",final_count.get('truck', 0),      "#00ffff")]
-        for col, (lbl, val, clr) in zip(m_cols, metrics):
-            with col:
+with tab2:
+    if st.session_state.results:
+        res = st.session_state.results
+        counts = res['count']
+        
+        # Metric Grid
+        import pandas as pd
+        st.markdown('<div class="metric-container">', unsafe_allow_html=True)
+        cols = st.columns(4)
+        for i, cls in enumerate(CLASSES_ORDER):
+            with cols[i]:
                 st.markdown(f"""
                 <div class="metric-card">
-                    <div class="metric-val" style="color:{clr}">{val}</div>
-                    <div class="metric-lbl">{lbl}</div>
-                </div>""", unsafe_allow_html=True)
+                    <div class="metric-lbl">{cls}s detected</div>
+                    <div class="metric-val">{counts.get(cls, 0)}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Log Table
+        if res['logs']:
+            st.markdown("### 📋 EVENT TIMELINE")
+            df = pd.DataFrame(res['logs'])
+            st.dataframe(df, use_container_width=True, height=500)
+    else:
+        st.info("Analysis required to view analytics. Please upload and process a video.")
 
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # ── Output Video Download ────────────────────────────────────
-        if os.path.exists(output_path):
-            with open(output_path, "rb") as vf:
-                st.download_button(
-                    label     = "⬇️ Download Tracked Video",
-                    data      = vf,
-                    file_name = "tracked_output.mp4",
-                    mime      = "video/mp4",
-                    use_container_width=True
-                )
-
-        # ── Logs Table ───────────────────────────────────────────────
-        st.markdown("---")
-        st.subheader("📋 Vehicle Crossing Log (MongoDB + Local)")
-
-        if all_logs:
-            import pandas as pd
-
-            df = pd.DataFrame(all_logs)
-            df = df[["track_id", "vehicle_type", "plate_number",
-                     "second", "frame_number", "confidence", "timestamp"]]
-            df.columns = ["Track ID", "Vehicle Type", "Plate Number",
-                          "Second", "Frame", "Confidence", "Timestamp"]
-            df = df.sort_values("Second").reset_index(drop=True)
-
-            # Filter controls
-            fc1, fc2 = st.columns(2)
-            with fc1:
-                vtype_filter = st.multiselect(
-                    "Vehicle Type Filter",
-                    options=CLASSES_ORDER,
-                    default=CLASSES_ORDER
-                )
-            with fc2:
-                plate_filter = st.text_input("Plate Number Search", "")
-
-            filtered = df[df["Vehicle Type"].isin(vtype_filter)]
-            if plate_filter:
-                filtered = filtered[
-                    filtered["Plate Number"].str.contains(
-                        plate_filter.upper(), na=False)
-                ]
-
-            st.dataframe(
-                filtered,
-                use_container_width=True,
-                height=400
-            )
-
-            st.caption(f"Total records: {len(filtered)}")
-
-            # CSV download
-            csv = filtered.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "⬇️ Download CSV Log",
-                data      = csv,
-                file_name = "vehicle_logs.csv",
-                mime      = "text/csv"
-            )
-        else:
-            st.info("No vehicles have crossed the line yet.")
-
-# ═══════════════════════════════════════════════════════════════════
-#  BOTTOM — MongoDB Previous Logs
-# ═══════════════════════════════════════════════════════════════════
-st.markdown("---")
-with st.expander("🗄️ MongoDB — View Historical Logs"):
+with tab3:
+    st.markdown("### 💾 CENTRALIZED CLOUD STORAGE (MONGODB)")
+    mongo_col = get_mongo()
     if mongo_col is not None:
         prev_logs = fetch_logs(mongo_col)
         if prev_logs:
             import pandas as pd
             pdf = pd.DataFrame(prev_logs)
-            st.dataframe(pdf, use_container_width=True, height=350)
-            st.caption(f"Total DB records: {len(prev_logs)}")
+            st.dataframe(pdf, use_container_width=True, height=600)
         else:
-            st.info("No records found in the database.")
+            st.info("No records found in cloud database.")
     else:
-        st.warning("MongoDB is not connected.")
+        st.warning("MongoDB not connected. Check your MONGO_URI environment variable.")
