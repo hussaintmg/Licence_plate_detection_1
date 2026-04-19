@@ -388,16 +388,36 @@ def check_crossing(track_info, line_cfg, tolerance=8):
     return abs(val - coord) <= tolerance or (prev_side != current_side)
 
 # ═══════════════════════════════════════════════════════════════════
-#  OCR — LICENSE PLATE TEXT EXTRACT
+#  OCR — LICENSE PLATE TEXT EXTRACT (OPTIMIZED)
 # ═══════════════════════════════════════════════════════════════════
 def extract_plate_text(ocr_reader, plate_crop):
+    if plate_crop is None or plate_crop.size == 0:
+        return "UNKNOWN"
     try:
-        results = ocr_reader.readtext(plate_crop, detail=0, paragraph=True)
+        # Preprocessing for better OCR
+        gray = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
+        
+        # Resize to at least 320px width if small
+        h, w = gray.shape
+        if w < 320:
+            scale = 320 / w
+            gray  = cv2.resize(gray, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LANCZOS4)
+            
+        # Optional: Contrast enhancement
+        gray = cv2.convertScaleAbs(gray, alpha=1.2, beta=0)
+        
+        results = ocr_reader.readtext(gray, detail=0, paragraph=True)
         text    = " ".join(results).strip().upper()
-        text    = re.sub(r'[^A-Z0-9\-]', '', text)
-        return text if len(text) >= 2 else "UNKNOWN"
+        # Filter for alphanumeric characters
+        text    = re.sub(r'[^A-Z0-9]', '', text)
+        
+        # Validation: Most license plates have 4-10 chars
+        if 3 <= len(text) <= 12:
+            return text
+        return "UNKNOWN"
     except Exception:
         return "UNKNOWN"
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  DRAW TOP STATS BOX  (video frame pe)
@@ -435,7 +455,7 @@ def draw_stats_box(frame, count):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.50, color, 2)
 
 # ═══════════════════════════════════════════════════════════════════
-#  MAIN PROCESSING FUNCTION
+#  MAIN PROCESSING FUNCTION (OPTIMIZED)
 # ═══════════════════════════════════════════════════════════════════
 def process_video(video_path, output_path, vehicle_model, plate_model,
                   ocr_reader, mongo_col, line_ratio,
@@ -461,23 +481,25 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
     FPS = motion_info['fps'] or 30
     TOT = motion_info['total']
 
-    # Using 'avc1' for H.264 encoding which is better for web browsers
-    # Fallback to 'mp4v' if 'avc1' is not available
+    # Using 'avc1' for H.264
     fourcc = cv2.VideoWriter_fourcc(*'avc1')
     out_wr = cv2.VideoWriter(output_path, fourcc, FPS, (W, H))
     
-    # Check if writer opened with avc1, if not fallback
     if not out_wr.isOpened():
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out_wr = cv2.VideoWriter(output_path, fourcc, FPS, (W, H))
 
-    tracker     = SimpleTracker(max_disappeared=40, iou_threshold=0.25)
-    count       = defaultdict(int)
-    counted_ids = set()
-    all_logs    = []
-    frame_num   = 0
+    tracker      = SimpleTracker(max_disappeared=40, iou_threshold=0.25)
+    count        = defaultdict(int)
+    counted_ids  = set()
+    best_plates  = {}  # Cache: {track_id: "BEST_TEXT"}
+    all_logs     = []
+    frame_num    = 0
 
     status_text.markdown('<div class="status-msg">🚗 Step 2: Processing frames & detecting vehicles...</div>', unsafe_allow_html=True)
+
+    # ROI for Plate Detection: Only process near the counting line (±15% of frame)
+    roi_threshold = 0.15 * (H if line_cfg['axis'] == 'y' else W)
 
     while True:
         ret, frame = cap.read()
@@ -494,7 +516,7 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
             for box in result.boxes:
                 cls_id = int(box.cls[0])
                 conf   = float(box.conf[0])
-                if cls_id in VEHICLE_CLASSES and conf > 0.30:
+                if cls_id in VEHICLE_CLASSES and conf > 0.35:
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
                     detections.append((x1, y1, x2, y2, VEHICLE_CLASSES[cls_id], conf))
 
@@ -503,52 +525,53 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
 
         # ── Draw Counting Line ───────────────────────────────────────
         cv2.line(frame, line_cfg['pt1'], line_cfg['pt2'], (0, 255, 255), 3)
-        cv2.putText(frame, line_cfg['label'],
-                    (line_cfg['pt1'][0]+8, line_cfg['pt1'][1]-10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
 
         # ── Process Each Tracked Vehicle ─────────────────────────────
         for (tid, x1, y1, x2, y2, cx, cy, cls_name, conf) in tracked:
             color = CLASS_COLORS.get(cls_name, (200, 200, 200))
-
-            # Vehicle bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
-            # Vehicle name label
-            v_label = f"{cls_name.upper()} ID:{tid}"
-            (lw, lh), _ = cv2.getTextSize(v_label, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 2)
-            cv2.rectangle(frame, (x1, y1-lh-10), (x1+lw+6, y1), color, -1)
-            cv2.putText(frame, v_label, (x1+3, y1-4),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 0, 0), 2)
-
-            # ── License Plate Detection ──────────────────────────────
-            plate_text = "UNKNOWN"
-            if plate_model is not None:
+            # Get plate text from cache or detect
+            plate_text = best_plates.get(tid, "UNKNOWN")
+            
+            # ── Optimized License Plate Detection ────────────────────
+            # Trigger ONLY if: 
+            # 1. We don't have a good plate yet OR current is "UNKNOWN"
+            # 2. Vehicle is near the counting line (ROI)
+            val    = cy if line_cfg['axis'] == 'y' else cx
+            dist   = abs(val - line_cfg['coord'])
+            
+            if (plate_text == "UNKNOWN") and (dist < roi_threshold) and (plate_model is not None):
                 vehicle_crop = frame[max(0,y1):y2, max(0,x1):x2]
                 if vehicle_crop.size > 0:
                     p_results = plate_model(vehicle_crop, verbose=False)[0]
                     for pbox in p_results.boxes:
                         if float(pbox.conf[0]) > 0.30:
-                            px1,py1,px2,py2 = map(int, pbox.xyxy[0])
+                            px1, py1, px2, py2 = map(int, pbox.xyxy[0])
+                            
                             abs_px1, abs_py1 = x1 + px1, y1 + py1
                             abs_px2, abs_py2 = x1 + px2, y1 + py2
-
                             cv2.rectangle(frame, (abs_px1, abs_py1), (abs_px2, abs_py2), (0, 165, 255), 2)
 
                             plate_crop = vehicle_crop[max(0,py1):py2, max(0,px1):px2]
-                            if plate_crop.size > 0:
-                                plate_text = extract_plate_text(ocr_reader, plate_crop)
-
-                            p_label = f"PLATE: {plate_text}"
-                            (pw, ph), _ = cv2.getTextSize(p_label, cv2.FONT_HERSHEY_SIMPLEX, 0.50, 2)
-                            cv2.rectangle(frame, (abs_px1, abs_py1-ph-10), (abs_px1+pw+6, abs_py1), (0, 100, 200), -1)
-                            cv2.putText(frame, p_label, (abs_px1+3, abs_py1-4), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 255, 255), 2)
+                            found_text = extract_plate_text(ocr_reader, plate_crop)
+                            
+                            if found_text != "UNKNOWN":
+                                best_plates[tid] = found_text
+                                plate_text = found_text
                             break
+
+            # ── Dynamic Label ────────────────────────────────────────
+            display_label = f"{cls_name.upper()} #{tid} | {plate_text}"
+            (lw, lh), _ = cv2.getTextSize(display_label, cv2.FONT_HERSHEY_SIMPLEX, 0.50, 2)
+            cv2.rectangle(frame, (x1, y1-lh-15), (x1+lw+10, y1), color, -1)
+            cv2.putText(frame, display_label, (x1+5, y1-8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 0, 0), 2)
 
             # ── Line Crossing Check ──────────────────────────────────
             if tid not in counted_ids:
                 track_info = tracker.tracks.get(tid)
-                if track_info and check_crossing(track_info, line_cfg, tolerance=8):
+                if track_info and check_crossing(track_info, line_cfg, tolerance=12):
                     counted_ids.add(tid)
                     count[cls_name] += 1
                     tracker.tracks[tid]['counted'] = True
@@ -570,8 +593,8 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
         draw_stats_box(frame, count)
         out_wr.write(frame)
 
-        # ── UI Update (Throttled) ───────────────────────────────────
-        if frame_num % 30 == 0 or frame_num == TOT:
+        # ── UI Update (Throttled even more for Speed) ───────────────
+        if frame_num % 45 == 0 or frame_num == TOT:
             progress = min(frame_num / max(TOT, 1), 1.0)
             progress_bar.progress(progress)
             
@@ -579,18 +602,18 @@ def process_video(video_path, output_path, vehicle_model, plate_model,
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 frame_placeholder.image(rgb, channels="RGB", use_container_width=True)
             
-            # Subtle update instead of spam
             status_text.markdown(f"""
             <div style="color: #00ffe0; font-size: 0.9rem; margin-top: 10px;">
-                Processing: <b>{frame_num}/{TOT}</b> frames | 
-                Vehicles Counted: <b>{sum(count.values())}</b> | 
-                Elapsed Simulation: <b>{current_second:.1f}s</b>
+                Processing: <b>{frame_num}/{TOT}</b> | 
+                Counted: <b>{sum(count.values())}</b> | 
+                Latest Plate: <b>{list(best_plates.values())[-1] if best_plates else 'N/A'}</b>
             </div>
             """, unsafe_allow_html=True)
 
     cap.release()
     out_wr.release()
     return count, all_logs
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  STREAMLIT UI
@@ -698,9 +721,13 @@ with tab1:
             
             with out_c1:
                 if os.path.exists(res['output_path']):
-                    st.video(res['output_path'])
+                    # Reading as bytes often fixes dashboard playback issues in Streamlit
+                    with open(res['output_path'], "rb") as video_file:
+                        video_bytes = video_file.read()
+                        st.video(video_bytes)
             
             with out_c2:
+
                 st.markdown("#### 📥 DOWNLOADS")
                 with open(res['output_path'], "rb") as f:
                     st.download_button("💾 DOWNLOAD PROCESSED VIDEO", f, "processed_traffic.mp4", "video/mp4", use_container_width=True)
